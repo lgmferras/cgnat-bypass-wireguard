@@ -1,0 +1,18 @@
+# WireGuard client config — local server (behind CGNAT)
+# Path: /etc/wireguard/wg0.conf
+#
+# Replace ALL placeholders before use:
+#   <LOCAL_PRIVATE_KEY>       — output of `wg genkey` on this machine
+#   <ORACLE_PUBKEY>           — output of `wg pubkey` on the Oracle Cloud VM
+#   <ORACLE_CLOUD_PUBLIC_IP>  — public IP of your Oracle Cloud VM
+
+[Interface]
+PrivateKey = <LOCAL_PRIVATE_KEY>
+Address    = 10.0.0.2/24
+
+[Peer]
+# Oracle Cloud VM (WireGuard server)
+PublicKey           = <ORACLE_PUBKEY>
+Endpoint            = <ORACLE_CLOUD_PUBLIC_IP>:51820
+AllowedIPs          = 10.0.0.1/32
+PersistentKeepalive = 25
