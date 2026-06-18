@@ -1,6 +1,8 @@
 # CGNAT Bypass with Oracle Cloud + WireGuard
 
-Zero-cost solution to expose services behind CGNAT using an Oracle Cloud Always Free VM as a WireGuard relay. Eliminates the need for a dedicated static IP (~US$40–100/month).
+Zero-cost solution to expose services behind CGNAT using an Oracle Cloud Always Free VM as a WireGuard relay. Real client IPs are preserved in local server logs via PROXY Protocol — no visibility loss from the proxy chain.
+
+Eliminates the need for a dedicated static IP (~US$40–100/month).
 
 Tested in a production MSP environment serving multiple clients in Brazil, where ISP CGNAT is nearly universal.
 
@@ -34,22 +36,26 @@ Internet → Oracle Cloud VM (public IP) → WireGuard tunnel → Your server
 │              Oracle Cloud Always Free VM                     │
 │              (ARM Ampere A1 · public IP)                     │
 │                                                              │
-│  Nginx stream  ──────────────► wg0: 10.0.0.1/24              │
-│  (TCP passthrough)             WireGuard server              │
+│  Nginx stream + PROXY Protocol ──► wg0: 10.0.0.1/24         │
+│  (preserves real client IP)        WireGuard server          │
 └───────────────────────────────┬──────────────────────────────┘
                                 │ WireGuard UDP 51820
                                 │ (encrypted tunnel)
                                 ▼
 ┌──────────────────────────────────────────────────────────────┐
 │              Local Server (behind CGNAT)                     │
-│              wg0: 10.0.0.2/24                                │
-│              WireGuard client                                │
+│              wg0: 10.0.0.2/24  · WireGuard client           │
 │                                                              │
-│  Caddy / Nginx / any service ◄── receives proxied traffic    │
+│  Nginx (PROXY Protocol) ◄── real client IP in all logs      │
+│  Your services                                               │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Traffic flow:** Client → Oracle Cloud public IP → Nginx forwards to WireGuard peer IP → Local server handles request → Response returns the same path.
+**Traffic flow:** Client → Oracle Cloud public IP → Nginx stream (PROXY Protocol header added) → WireGuard tunnel → Local Nginx (reads PROXY Protocol, exposes real IP via `$remote_addr`) → Your services.
+
+### Why PROXY Protocol matters
+
+Without it, the local server sees every request as originating from the WireGuard tunnel IP (`10.0.0.1`). With PROXY Protocol enabled on both ends, the real client IP travels through the entire proxy chain and appears correctly in access logs, rate limiting rules, and geo-blocking — as if there were no proxy at all.
 
 ---
 
@@ -64,8 +70,8 @@ Internet → Oracle Cloud VM (public IP) → WireGuard tunnel → Your server
 
 ### Local server
 - Linux (tested on Ubuntu/Debian and Docker hosts)
-- WireGuard (`apt install wireguard` or `apt install wireguard-tools`)
-- Your actual services (Caddy, Nginx, Docker, etc.) listening on the WireGuard interface or `0.0.0.0`
+- WireGuard (`apt install wireguard-tools`)
+- Nginx configured to accept PROXY Protocol (see [`nginx/local-nginx.conf.example`](nginx/local-nginx.conf.example))
 
 ---
 
@@ -116,7 +122,7 @@ wg show
 ping 10.0.0.1   # should reach Oracle Cloud VM
 ```
 
-### 5. Configure Nginx on Oracle Cloud VM
+### 5. Configure Nginx stream on Oracle Cloud VM
 
 Install Nginx with stream module:
 
@@ -126,13 +132,31 @@ apt install -y nginx-full
 
 Copy [`nginx/stream.conf.example`](nginx/stream.conf.example) to `/etc/nginx/stream.d/cgnat-bypass.conf`.
 
+The stream config uses `proxy_protocol on` to inject the real client IP into the forwarded connection.
+
 Enable and test:
 
 ```bash
 nginx -t && systemctl reload nginx
 ```
 
-### 6. Configure Oracle Cloud Security List
+### 6. Configure Nginx on local server
+
+Copy [`nginx/local-nginx.conf.example`](nginx/local-nginx.conf.example) as a reference. The key directives are:
+
+```nginx
+# In http {}
+set_real_ip_from  10.0.0.1;     # Oracle Cloud VM WireGuard IP
+real_ip_header    proxy_protocol;
+
+# In server {}
+listen 80  proxy_protocol;
+listen 443 ssl proxy_protocol;
+```
+
+This makes `$remote_addr` return the real client IP everywhere — logs, rate limiting, `X-Real-IP` headers forwarded to apps.
+
+### 7. Configure Oracle Cloud Security List
 
 In the Oracle Cloud Console, add ingress rules for:
 - UDP 51820 (WireGuard handshake)
@@ -140,7 +164,7 @@ In the Oracle Cloud Console, add ingress rules for:
 - TCP 443 (HTTPS)
 - Any other ports your services need
 
-Also open the same ports in the VM's firewall:
+Also open the same ports in the VM's OS firewall:
 
 ```bash
 iptables -I INPUT -p udp --dport 51820 -j ACCEPT
@@ -157,7 +181,8 @@ iptables -I INPUT -p tcp --dport 443 -j ACCEPT
 |---|---|
 | [`wireguard/oracle-wg0.conf.example`](wireguard/oracle-wg0.conf.example) | WireGuard server config for Oracle Cloud VM |
 | [`wireguard/local-wg0.conf.example`](wireguard/local-wg0.conf.example) | WireGuard client config for local server |
-| [`nginx/stream.conf.example`](nginx/stream.conf.example) | Nginx TCP stream proxy config for Oracle Cloud VM |
+| [`nginx/stream.conf.example`](nginx/stream.conf.example) | Nginx stream proxy (Oracle Cloud VM) — sends PROXY Protocol |
+| [`nginx/local-nginx.conf.example`](nginx/local-nginx.conf.example) | Nginx config (local server) — receives and reads PROXY Protocol |
 
 ---
 
@@ -177,10 +202,10 @@ Oracle Cloud Always Free resources do not expire as long as the account remains 
 
 ## Production Notes
 
-- This setup runs in production at [Systrix Tecnologia](https://systrix.com.br/) serving multiple clients with Docker-based services (Caddy, Zabbix, Nextcloud, GLPI, NetBox)
+- This setup runs in production at [Systrix Tecnologia](https://systrix.com.br/) serving multiple clients with Docker-based services (Zabbix, Nextcloud, GLPI, NetBox, Vaultwarden)
 - The WireGuard tunnel is monitored via a [custom Zabbix template](https://github.com/lgmferras/zabbix-templates/tree/main/templates/wireguard-tunnel) that tracks interface state, peers, and handshake age
 - `PersistentKeepalive = 25` keeps the tunnel alive through double NAT and idle timeouts
-- Caddy on the local server handles TLS termination and Let's Encrypt — no TLS configuration needed on the Oracle Cloud VM
+- PROXY Protocol requires `nginx-full` (not `nginx`) on Ubuntu/Debian — the stream module must be compiled in
 
 ---
 

@@ -1,0 +1,52 @@
+# Nginx config — local server (behind CGNAT)
+# This config receives traffic forwarded via PROXY Protocol from the Oracle Cloud VM.
+# The real_ip directives extract the original client IP from the PROXY Protocol header,
+# so access logs, rate limiting and geo rules see the actual visitor IP instead of
+# the WireGuard tunnel address (10.0.0.1).
+#
+# Place server blocks inside http {} as usual. The listen directive must include
+# the proxy_protocol flag to accept the header sent by the Oracle Cloud Nginx stream.
+#
+# Requires: nginx (any build that includes ngx_http_realip_module, which is standard)
+
+http {
+
+    # Trust PROXY Protocol headers from the WireGuard peer only
+    set_real_ip_from  10.0.0.1;        # Oracle Cloud VM WireGuard IP
+    real_ip_header    proxy_protocol;
+
+    server {
+        # Accept PROXY Protocol on port 80
+        listen 80 proxy_protocol;
+
+        server_name example.com;
+
+        location / {
+            proxy_pass http://your-app:8080;
+
+            # Forward the real client IP to the upstream application
+            proxy_set_header X-Real-IP       $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host            $host;
+        }
+    }
+
+    server {
+        # Accept PROXY Protocol on port 443 (TLS terminated here)
+        listen 443 ssl proxy_protocol;
+
+        server_name example.com;
+
+        ssl_certificate     /etc/nginx/ssl/fullchain.pem;
+        ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+
+        location / {
+            proxy_pass http://your-app:8080;
+
+            proxy_set_header X-Real-IP       $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host            $host;
+        }
+    }
+
+}

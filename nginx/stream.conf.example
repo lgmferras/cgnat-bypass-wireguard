@@ -9,20 +9,24 @@
 #   }
 #
 # 10.0.0.2 is the WireGuard IP of the local server.
-# Adjust ports to match your services.
+# proxy_protocol on — sends the real client IP to the local server via PROXY Protocol.
+# The local Nginx must be configured to accept PROXY Protocol (see nginx/local-nginx.conf.example).
 
 server {
     listen 80;
     proxy_pass 10.0.0.2:80;
+    proxy_protocol on;
 }
 
 server {
     listen 443;
     proxy_pass 10.0.0.2:443;
+    proxy_protocol on;
 }
 
 # Add more servers as needed, e.g. for custom ports:
 # server {
 #     listen 8443;
 #     proxy_pass 10.0.0.2:8443;
+#     proxy_protocol on;
 # }
