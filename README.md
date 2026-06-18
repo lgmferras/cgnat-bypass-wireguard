@@ -36,7 +36,7 @@ Internet → Oracle Cloud VM (public IP) → WireGuard tunnel → Your server
 │              Oracle Cloud Always Free VM                     │
 │              (ARM Ampere A1 · public IP)                     │
 │                                                              │
-│  Nginx stream + PROXY Protocol ──► wg0: 10.0.0.1/24         │
+│  Nginx stream + PROXY Protocol ──► wg0: 10.0.0.1/24          │
 │  (preserves real client IP)        WireGuard server          │
 └───────────────────────────────┬──────────────────────────────┘
                                 │ WireGuard UDP 51820
@@ -44,9 +44,9 @@ Internet → Oracle Cloud VM (public IP) → WireGuard tunnel → Your server
                                 ▼
 ┌──────────────────────────────────────────────────────────────┐
 │              Local Server (behind CGNAT)                     │
-│              wg0: 10.0.0.2/24  · WireGuard client           │
+│              wg0: 10.0.0.2/24  · WireGuard client            │
 │                                                              │
-│  Nginx (PROXY Protocol) ◄── real client IP in all logs      │
+│  Nginx (PROXY Protocol) ◄── real client IP in all logs       │
 │  Your services                                               │
 └──────────────────────────────────────────────────────────────┘
 ```
